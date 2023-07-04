@@ -36,13 +36,16 @@ public class JarESModuleRepository extends AbstractESModuleRepository {
     private final File jarFile;
     private final Path root;
 
-    final private static Pattern LEADING_SLASHES = Pattern.compile("^/+");
+    /* Leading_slashes includes backslashes also - pp 2 */
+    final private static Pattern LEADING_SLASHES = Pattern.compile("^(/|\\\\)+"); 
     static private String removeLeadingSlashes(String path) {
         return LEADING_SLASHES.matcher(path).replaceFirst("");
     }
     private static final List<String> SUFFIXES = List.of("", ".mjs", ".js");
     private Path resolveZipEntryPath(@NotNull Path relativeModulePath) {
-        if (relativeModulePath.isAbsolute()) {
+    	
+    	/* Checking for leading slashes in Win & UNIX - pp 3 */
+    	if (relativeModulePath.isAbsolute() || relativeModulePath.startsWith("\\")) { 
             // paths to zip entries in a jar file don't start with
             // a '/'. Remove leading '/'.
             relativeModulePath = Path.of(removeLeadingSlashes(relativeModulePath.toString()));
@@ -59,8 +62,11 @@ public class JarESModuleRepository extends AbstractESModuleRepository {
         // try to locate a suitable zip entry
         return SUFFIXES.stream().map(suffix -> path + suffix)
             .filter(p -> {
-                var entry = jar.getEntry(p);
-                logFine(() -> MessageFormat.format("Tried relative repo path ''{0}'', found entry ''{1}''", p, entry));
+            	/* replace backslash with a forward slash - pp 4 */
+            	var p2 = p.replaceAll("\\\\", "/");
+                var entry = jar.getEntry(p2); 
+
+                logFine(() -> MessageFormat.format("Tried relative repo path ''{0}'', found entry ''{1}''", p2, entry));
                 return entry != null && !entry.isDirectory();
             })
             .findFirst()
@@ -74,7 +80,14 @@ public class JarESModuleRepository extends AbstractESModuleRepository {
     @Override
     public URI getBaseURI() {
         try {
-            return ModuleJarURI.buildJarUri(jarFile.getAbsolutePath(), root.toString());
+        	if (!root.toString().isEmpty()) {
+        		return ModuleJarURI.buildJarUri(jarFile.getAbsolutePath(), root.toString());
+        	} else {
+        		/* adding jar repo file in settings - pp 8 */
+        		return ModuleJarURI.buildJarUri(jarFile.getAbsolutePath(), "/");	
+        	}
+        	
+            
         } catch (MalformedURLException | URISyntaxException e) {
             // shouldn't happen
             throw new RuntimeException(e);
@@ -172,7 +185,7 @@ public class JarESModuleRepository extends AbstractESModuleRepository {
     @Override
     public @Null Path resolveModulePath(@NotNull Path modulePath) {
         Objects.requireNonNull(modulePath);
-        if (modulePath.isAbsolute()) {
+        if (modulePath.isAbsolute() || modulePath.toString().startsWith("\\")) /* pp 7 */ {
             var normalizedModulePath= modulePath.normalize();
             logFine(() -> MessageFormat.format(
                 "{0}: normalized module path is ''{1}''",
@@ -199,12 +212,11 @@ public class JarESModuleRepository extends AbstractESModuleRepository {
                 if (root.toString().isEmpty()) {
                     return Path.of(getUniquePathPrefix().toString(), resolvedRelativeRepoPath.toString());
                 } else {
-                    return Path.of(
-                        getUniquePathPrefix().toString(),
-                        resolvedRelativeRepoPath.subpath(
+                	String s1 = getUniquePathPrefix().toString();
+                	String s2 = resolvedRelativeRepoPath.subpath(
                             root.getNameCount(),
-                            resolvedRelativeRepoPath.getNameCount()).toString()
-                    );
+                            resolvedRelativeRepoPath.getNameCount()).toString(); 
+                    return Path.of( s1, s2 );
                 }
             } else {
                 logFine(() -> MessageFormat.format(
@@ -261,7 +273,8 @@ public class JarESModuleRepository extends AbstractESModuleRepository {
                 getUniquePathPrefix().toString()
             ));
         }
-        final var zipEntry = jar.getEntry(zipEntryPath.toString());
+        /* replace backslash with forward slash - pp 6 */
+        final var zipEntry = jar.getEntry(zipEntryPath.toString().replaceAll("\\\\", "/"));
         if (zipEntry == null) {
             // shouldn't happen, but just in case
             throw new IllegalArgumentException(MessageFormat.format(
